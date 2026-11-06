@@ -730,7 +730,25 @@ async function showMessageNotification(title, body, tag) {
   try {
     const n = new Notification(title, { body, tag, renotify: true });
     n.onclick = () => { window.focus(); n.close(); };
+    openNotifications.add(n);
+    n.onclose = () => openNotifications.delete(n);
   } catch (e) { /* 通知を出せない環境では何もしない */ }
+}
+
+// サイトを開いた（見た）ときに、出ている通知を消す。
+const openNotifications = new Set();
+async function clearMessageNotifications() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        const list = await reg.getNotifications();
+        list.forEach((n) => { if (String(n.tag || "").startsWith("chat-")) n.close(); });
+      }
+    }
+  } catch (e) { /* 消せない環境では何もしない */ }
+  openNotifications.forEach((n) => { try { n.close(); } catch (e) {} });
+  openNotifications.clear();
 }
 
 function playChime() {
@@ -1464,10 +1482,12 @@ function WordListRoom({ name, room, onLeave }) {
   useEffect(() => {
     const onWake = () => {
       if (!document.hidden) {
+        clearMessageNotifications();
         const es = esRef.current;
         if (!es || es.readyState !== EventSource.OPEN) connectSSE();
       }
     };
+    clearMessageNotifications(); // 通知から開いた直後にも消す
     document.addEventListener("visibilitychange", onWake);
     window.addEventListener("focus", onWake);
     window.addEventListener("online", onWake);
