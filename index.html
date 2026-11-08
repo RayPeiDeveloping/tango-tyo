@@ -726,9 +726,10 @@ function writeNotifyOff(off) { try { if (off) localStorage.setItem(NOTIFY_OFF_KE
 
 // ===== Web Push（アプリを閉じていても通知が届くようにする）=====
 // 下の2つを、手順で作った自分の値に書き換える。
-const PUSH_API = "https://tango-push.eisas12m08y.workers.dev";
-const VAPID_PUBLIC_KEY = "BH9EL0PjbYENYjVQn-NYIaHnQwkW1EPS9qhyK3rCNPWKHzIr3DLmUGbw7KpdYEWtG0ora_qxW09EkXZLP19T8js";
+const PUSH_API = "https://tango-push.YOUR-SUBDOMAIN.workers.dev";
+const VAPID_PUBLIC_KEY = "YOUR_VAPID_PUBLIC_KEY";
 const DEVICE_ID_KEY = "tango_device_id";
+let pushActive = false; // この端末でWeb Pushが使える状態なら true（そのときは自前の通知を出さない）
 
 function pushReady() {
   return !PUSH_API.includes("YOUR-") && !VAPID_PUBLIC_KEY.startsWith("YOUR_") &&
@@ -769,11 +770,13 @@ async function subscribePush(topic) {
       });
     }
     const res = await pushPost("/subscribe", { topic, deviceId: getDeviceId(), subscription: sub.toJSON() });
+    pushActive = res.ok;
     return res.ok;
   } catch (e) { return false; }
 }
 async function unsubscribePush(topic) {
   if (!pushReady()) return;
+  pushActive = false;
   try { await pushPost("/unsubscribe", { topic, deviceId: getDeviceId() }); } catch (e) {}
 }
 // メッセージを送ったあと、ほかの端末にプッシュしてもらう（失敗しても送信自体には影響しない）
@@ -1096,9 +1099,9 @@ function WordListRoom({ name, room, onLeave }) {
     if (isNew && loadedRef.current && msg.sender !== name &&
         (document.hidden || !document.hasFocus())) {
       playChime();
-      if (notifyOnRef.current) {
+      if (notifyOnRef.current && !pushActive) {
         const preview = Array.from(String(msg.text || "")).slice(0, 60).join("");
-        showMessageNotification("たんご帳", `${msg.sender}：${preview}`, `chat-${topic}`);
+        showMessageNotification("", preview, `chat-${topic}`);
       }
     }
   }, [name, topic]);
