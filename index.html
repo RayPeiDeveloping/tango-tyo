@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>たんご帳</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="たんご帳">
+<meta name="theme-color" content="#ffe401">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -717,6 +723,64 @@ function speak(word) {
 const NOTIFY_OFF_KEY = "tango_notify_off";
 function readNotifyOff() { try { return localStorage.getItem(NOTIFY_OFF_KEY) === "1"; } catch (e) { return false; } }
 function writeNotifyOff(off) { try { if (off) localStorage.setItem(NOTIFY_OFF_KEY, "1"); else localStorage.removeItem(NOTIFY_OFF_KEY); } catch (e) {} }
+
+// ===== Web Push（アプリを閉じていても通知が届くようにする）=====
+// 下の2つを、手順で作った自分の値に書き換える。
+const PUSH_API = "https://tango-push.eisas12m08y.workers.dev";
+const VAPID_PUBLIC_KEY = "BH9EL0PjbYENYjVQn-NYIaHnQwkW1EPS9qhyK3rCNPWKHzIr3DLmUGbw7KpdYEWtG0ora_qxW09EkXZLP19T8js";
+const DEVICE_ID_KEY = "tango_device_id";
+
+function pushReady() {
+  return !PUSH_API.includes("YOUR-") && !VAPID_PUBLIC_KEY.startsWith("YOUR_") &&
+    "serviceWorker" in navigator && "PushManager" in window;
+}
+function getDeviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) {
+      id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2));
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch (e) { return "unknown-" + Math.random().toString(36).slice(2); }
+}
+function urlBase64ToUint8Array(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+async function pushPost(path, payload) {
+  return fetch(PUSH_API + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+// 端末のプッシュ購読を作って、サーバーにこの部屋（topic）の宛先として登録する
+async function subscribePush(topic) {
+  if (!pushReady() || typeof Notification === "undefined" || Notification.permission !== "granted") return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    const res = await pushPost("/subscribe", { topic, deviceId: getDeviceId(), subscription: sub.toJSON() });
+    return res.ok;
+  } catch (e) { return false; }
+}
+async function unsubscribePush(topic) {
+  if (!pushReady()) return;
+  try { await pushPost("/unsubscribe", { topic, deviceId: getDeviceId() }); } catch (e) {}
+}
+// メッセージを送ったあと、ほかの端末にプッシュしてもらう（失敗しても送信自体には影響しない）
+function notifyPush(topic, sender, preview) {
+  if (!pushReady()) return;
+  try { pushPost("/notify", { topic, deviceId: getDeviceId(), sender, preview }).catch(() => {}); } catch (e) {}
+}
 // 新着の通知を出す。Android の Chrome は new Notification() が使えないので、
 // Service Worker（sw.js）が動いていればそちら経由で出し、無ければ new Notification() にする。
 async function showMessageNotification(title, body, tag) {
@@ -959,6 +1023,7 @@ function WordListRoom({ name, room, onLeave }) {
   const seenIdsRef = useRef(new Set());
   const isAtBottomRef = useRef(true);
   const topic = useRef(roomToTopic(room)).current;
+  useEffect(() => { if (notifyOn) subscribePush(topic); }, [notifyOn, topic]);
 
   // ---- WebRTC voice call state ----
   const [callStatus, setCallStatus] = useState("idle"); // idle | outgoing | incoming | connecting | active
@@ -1555,14 +1620,15 @@ function WordListRoom({ name, room, onLeave }) {
       const next = !notifyOn;
       writeNotifyOff(!next);
       setNotifyOn(next);
+      if (next) subscribePush(topic); else unsubscribePush(topic);
       return;
     }
     const perm = await Notification.requestPermission();
-    if (perm === "granted") writeNotifyOff(false);
+    if (perm === "granted") { writeNotifyOff(false); subscribePush(topic); }
     setNotifyOn(perm === "granted");
     setNotifyMsg(
       perm === "granted"
-        ? "通知をオンにしました。このタブをブラウザで開いたままにしておいてください。"
+        ? (pushReady() ? "通知をオンにしました。アプリを閉じていても届きます。" : "通知をオンにしました。このタブをブラウザで開いたままにしておいてください。")
         : "通知が許可されませんでした。ブラウザの設定から変更できます。"
     );
   };
@@ -1578,6 +1644,7 @@ function WordListRoom({ name, room, onLeave }) {
         body: JSON.stringify({ sender: name, text }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      notifyPush(topic, name, text);
       setDraft("");
       setError(null);
     } catch (e) {
@@ -1626,6 +1693,7 @@ function WordListRoom({ name, room, onLeave }) {
         body: photoDraft.blob,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      notifyPush(topic, name, "📷 写真を送りました");
       closePhotoModal();
       setError(null);
     } catch (e) {
