@@ -619,11 +619,52 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } = React;
 
-const NTFY_BASE = "https://ntfy.sh";
+// ---- Firebase（Realtime Database + 匿名認証）----
+const firebaseConfig = {
+  apiKey: "AIzaSyAtpXsPpuLPxJN3oON1I0wtchyB6BJ4uzY",
+  authDomain: "tango-tyo.firebaseapp.com",
+  databaseURL: "https://tango-tyo-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "tango-tyo",
+  storageBucket: "tango-tyo.firebasestorage.app",
+  messagingSenderId: "617044102483",
+  appId: "1:617044102483:web:69369e8226715ad9a925a6",
+  measurementId: "G-QGZG8E949B"
+};
+firebase.initializeApp(firebaseConfig);
+const fbAuth = firebase.auth();
+const fbDb = firebase.database();
+const FB_TS = firebase.database.ServerValue.TIMESTAMP;
+const MSG_TTL_MS = 7 * 24 * 60 * 60 * 1000; // メッセージ・写真の保存期間（7日）
+
+// 匿名ログイン（読み書きにはログインが必要。ルール側で auth != null を確認する）
+let authPromise = null;
+function ensureAuth() {
+  if (!authPromise) {
+    authPromise = new Promise((resolve, reject) => {
+      const unsub = fbAuth.onAuthStateChanged((u) => {
+        if (u) { unsub(); resolve(u); }
+        else fbAuth.signInAnonymously().catch((e) => { unsub(); authPromise = null; reject(e); });
+      });
+    });
+  }
+  return authPromise;
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error("read failed"));
+    r.readAsDataURL(blob);
+  });
+}
 
 const WORD_BANK = [
   "a piece of ～", "a couple of ～", "a number of ～", "dozens of ～", "plenty of ～", "a great/good deal (of ～)", "at home", "in time", "in fashion", "on time", "on duty", "on schedule", "up to date", "be aware of ～", "be made of ～", "be capable of ～", "be afraid of ～", "be sure of/about ～", "be composed of ～", "be based on/upon ～", "be different from ～", "be absent from ～", "be engaged in ～", "be responsible for ～", "be married (to ～)", "be satisfied with ～", "be curious about ～", "be well off", "be likely to do", "be willing to do", "be about to do", "lead to ～", "refer to ～", "contribute to ～", "amount to ～", "depend on/upon ～", "focus on ～", "rely on/upon ～", "get on (～)", "insist on/upon ～", "concentrate on ～", "look for ～", "search for ～", "prepare for ～", "think of ～", "consist of ～", "complain about/of ～", "die of/from ～", "suffer from ～", "result from ～", "graduate from ～", "differ from ～", "recover from ～", "hear from ～", "believe in ～", "succeed in ～", "major in ～", "abound in/with ～", "care about ～", "bring about ～", "deal with ～", "go through ～", "give up ～", "grow up", "pick up ～", "set up ～", "wake up (～)", "brush up (on) ～", "find out ～", "carry out ～", "point out ～", "figure out (～)", "turn out (～)", "fill out ～", "pick out ～", "put on ～", "work on (～)", "try on ～", "turn on (～)", "turn off (～)", "take off (～)", "get along", "get together (～)", "calm down (～)", "think over ～", "keep doing", "take place", "play a role/part (in ～)", "make sure (～)", "make sense", "make a difference", "make a mistake", "make progress", "make up one's mind", "do one's best", "keep one's promise/word", "get lost", "enjoy oneself", "have/take ～ off", "pay attention to ～", "take care of ～", "look forward to ～", "ask for ～", "get rid of ～", "fall in love with ～", "used to do/be", "had better do", "help A with B", "prefer A to B", "turn A into B", "prevent A from B", "remind A of/about B", "regard A as B", "associate A with B", "inform A of/about B", "after all", "all the time", "all the way", "～ and so on/forth", "and yet", "as ～ as possible/one can", "as a result (of ～)", "as a whole", "as usual", "at best", "at least", "at (the) most", "at a time", "at once", "at all", "at any rate", "at random", "more or less", "at times", "between you and me", "by hand", "by mistake", "by no means", "by the way", "far from ～", "for a while", "for example/instance", "for one thing", "in a hurry", "in addition (to ～)", "in any case/event", "in detail", "in fact", "in general", "in other words", "in public", "in reality", "in the end", "in the future", "in the long run", "no doubt", "no longer ～", "not always ～", "on earth", "on the other hand", "so far", "sooner or later", "these days", "according to ～", "owing/due to ～", "thanks to ～", "in spite of ～", "all over (～)", "apart from ～", "aside from ～", "ahead of ～", "in search of ～", "in preparation", "each other", "so ～ that …", "A as well as B", "not only A but (also) B", "as if/though …", "as soon as …", "Something is wrong with ～.", "bring up ～", "call off ～", "carry on (～)", "come about", "come by ～", "come up with ～", "do away with ～", "find fault with ～", "get over", "hand in ～", "learn ～ by heart", "look into ～", "look over ～", "pass away", "put off ～", "put together ～", "put up ～", "put up with ～", "set about ～", "set in", "take after ～", "of importance", "along with ～", "in connection with ～", "on board (～)", "prior to ～", "(every) once in a while", "above all (else)", "all of a sudden", "(all/just) the same", "as a (general) rule", "as well", "before long", "by degrees", "for good", "for the most part", "from time to time", "in advance", "in all", "in particular", "on occasion(s)", "on purpose", "over and over (again)", "right away", "agree to ～", "agree with ～", "apply for ～", "apply to ～", "remember doing", "remember to do", "catch up with/to ～", "keep pace with ～", "keep up with ～", "leave ～ alone", "let alone ～", "correspond to ～", "correspond with ～", "hit on/upon ～", "occur to ～", "dawn on ～", "make the best of ～", "make the most of ～", "lay off ～", "lay out ～", "be concerned about/for ～", "be concerned with/in ～", "be free from/of ～", "be free to do", "be familiar to ～", "be familiar with ～", "be true of ～", "be true to ～", "be tired from/with ～", "be tired of ～", "be bound for ～", "be bound to do", "be anxious about ～", "be anxious to do", "～ to come", "～ to go", "anything but ～", "nothing but ～", "at first", "for the first time", "in the way (of ～)", "on the way (to ～)", "by now", "for now", "on the contrary", "to the contrary", "in the air", "on the air", "by chance", "by any chance", "as a matter of course", "as a matter of fact", "at a distance", "in the distance", "inside out", "upside down", "provide A with B", "supply A with B", "mistake A for B", "take A for B", "look on/upon A as B", "think of A as B", "distinguish A from B", "tell A from B", "participate in ～", "take part in ～", "compensate for ～", "make up (～)", "care for ～", "look after ～", "show up (～)", "turn up (～)", "consist in ～", "lie in ～", "give in (～)", "give way (to ～)", "stand out", "stick out", "cling to ～", "stick to ～", "count on/upon ～", "rest on/upon", "look out for ～", "watch out for ～", "hand over ～", "turn over ～", "date back to ～", "date from ～", "put aside ～", "set aside ～", "sit up", "stay up", "hold back ～", "keep back ～", "feel sorry for ～", "take/have pity on ～", "sympathize with ～", "take pride in ～", "pride oneself on ～", "surrender to ～", "yield to ～", "be essential to ～", "be indispensable to/for ～", "be equal to ～", "be equivalent to ～", "be apt to do", "be inclined to do", "in a sense", "in a way", "first of all", "in the first place", "back and forth", "up and down", "at present", "at the moment", "in a word", "in short", "generally speaking", "on the whole", "all in all", "in principle", "in theory", "at all cost(s)/any cost", "by all means", "as it were", "so to speak", "for one's (own) part", "on one's part", "for the present", "for the time being", "close/near at hand", "(just) around the corner", "for all ～", "with all ～", "as for ～", "as to ～", "not to mention ～", "to say nothing of ～", "be dependent on/upon ～", "be independent of ～", "in order", "out of order", "look down on/upon ～", "look up to ～", "do with ～", "do without ～", "in/within sight", "out of sight", "at one's ease", "ill at ease", "act on/upon ～", "break in ～", "break out", "break up ～", "call for ～", "call on/upon ～", "come across ～", "come to ～", "give out ～", "go by ～", "go off", "go on ～", "go out", "go over ～", "go with ～", "hold out ～", "hold up ～", "live on ～", "look to ～", "look up ～", "put out ～", "settle down", "stand by ～", "stand for ～", "take in ～", "take on ～", "take to ～", "take up ～", "turn down ～", "turn in ～", "make for ～", "make out ～", "meet with ～", "provide for ～", "put down ～", "run over ～", "set out ～", "be due to do", "up to ～", "at large", "in effect", "all but ～", "at length", "next to ～", "on end", "by way of ～", "add to ～", "adapt to ～", "object to ～", "admit to ～", "conform to/with ～", "resort to ～", "keep to ～", "get to ～", "adhere to ～", "reflect on/upon ～", "decide on/upon ～", "fall on/upon ～", "feed on ～", "run into ～", "break into ～", "enter into ～", "burst into ～", "dispose of ～", "approve of ～", "boast of/about ～", "become of ～", "derive from ～", "aim at ～", "interfere with ～", "part with ～", "long for ～", "send for ～", "go about ～", "run across ～", "end up", "use up ～", "sum up ～", "clear up ～", "tie up ～", "cheer up ～", "blow up ～", "call up ～", "shut up ～", "step up ～", "cut down/back (on) ～", "slow down ～", "break down ～", "hand down ～", "take down ～", "burn down ～", "come out", "run out", "speak out/up", "drop out", "sort out ～", "wear out ～", "roll out ～", "iron out ～", "set off ～", "show off ～", "keep off ～", "give off ～", "break off ～", "take over ～", "put in ～", "drop in", "cut in", "pass on ～", "give away ～", "adjust (A) to B", "compare A with/to B", "expose A to B", "leave A (up) to B", "attach A to B", "attribute A to B", "owe A to B", "confine A to B", "liken A to B", "keep A from B", "discourage A from B", "forbid A from B", "prohibit A from B", "order A from B", "substitute A for B", "exchange A for B"
@@ -669,7 +710,7 @@ function hashToIndex(str, mod) {
 }
 
 // 写真は長辺1280px・JPEGに縮小してから送る（通信量と送信失敗を減らすため）。
-function compressImage(file, maxSide = 1280, quality = 0.78) {
+function compressImage(file, maxSide = 960, quality = 0.6) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -779,7 +820,7 @@ async function unsubscribePush(topic) {
 // メッセージを送ったあと、ほかの端末にプッシュしてもらう（失敗しても送信自体には影響しない）
 function notifyPush(topic, sender, preview) {
   if (!pushReady()) return;
-  try { pushPost("/notify", { topic, deviceId: getDeviceId(), sender: "", preview }) /* 通知にユーザー名を出さないため sender は空で送る */.catch(() => {}); } catch (e) {}
+  try { pushPost("/notify", { topic, deviceId: getDeviceId(), sender, preview }).catch(() => {}); } catch (e) {}
 }
 // 新着の通知を出す。Android の Chrome は new Notification() が使えないので、
 // Service Worker（sw.js）が動いていればそちら経由で出し、無ければ new Notification() にする。
@@ -1015,10 +1056,8 @@ function WordListRoom({ name, room, onLeave }) {
   const fileInputRef = useRef(null);
   const [connState, setConnState] = useState("connecting"); // connecting | live | reconnecting
   const messagesRef = useRef(null);
-  const esRef = useRef(null);
-  const reconnectTimerRef = useRef(null);
-  const reconnectAttemptsRef = useRef(0);
-  const sinceRef = useRef("all");
+  const hasBeenLiveRef = useRef(false);
+  const seenSignalIdsRef = useRef(new Set());
   const loadedRef = useRef(false);
   const seenIdsRef = useRef(new Set());
   const isAtBottomRef = useRef(true);
@@ -1050,41 +1089,21 @@ function WordListRoom({ name, room, onLeave }) {
   const callRouteIntervalRef = useRef(null);
   const handleSignalRef = useRef(null);
 
-  // Turn one raw ntfy JSON line into a message we can render, and push it
-  // into state. Shared by the initial history fetch and the live stream so
-  // both paths behave identically.
-  const processLine = useCallback((line) => {
-    let obj;
-    try { obj = JSON.parse(line); } catch (e) { return; }
-    if (obj.event !== "message" || !obj.message) return;
-    let payload;
-    try {
-      payload = JSON.parse(obj.message);
-    } catch (e) {
-      payload = { sender: "?", text: obj.message };
-    }
-
-    if (payload.kind === "call-signal") {
-      // Skip signals replayed from history (initial /json?since=all fetch,
-      // or a long-stalled reconnect) - only ever act on fresh signaling.
-      const ageSec = obj.time ? (Date.now() / 1000 - obj.time) : 0;
-      if (ageSec <= 30 && handleSignalRef.current) {
-        handleSignalRef.current(payload);
-      }
-      return;
-    }
-
-    const att = obj.attachment;
-    const isPhoto = !!(att && att.url && String(att.type || "").startsWith("image/"));
+// Realtime Database の1件（メッセージ）を表示用に変換して state に入れる。
+  // 履歴の読み込みと新着の受信で同じ処理を使う。
+  const processMessage = useCallback((snap) => {
+    const v = snap.val();
+    if (!v || typeof v !== "object") return;
+    const isPhoto = typeof v.photo === "string" && v.photo.startsWith("data:image/");
     const msg = {
-      id: obj.id,
-      sender: isPhoto && payload.sender ? safeDecode(payload.sender) : (payload.sender || "不明"),
-      text: isPhoto ? "📷 写真" : (payload.text || obj.message),
-      ts: (obj.time || Date.now() / 1000) * 1000,
-      photo: isPhoto ? { url: att.url, expires: att.expires ? att.expires * 1000 : null } : null,
+      id: snap.key,
+      sender: v.sender || "不明",
+      text: isPhoto ? "📷 写真" : String(v.text || ""),
+      ts: typeof v.ts === "number" ? v.ts : Date.now(),
+      photo: isPhoto ? { url: v.photo, expires: null } : null,
     };
-    sinceRef.current = obj.id;
 
+    if (msg.ts < Date.now() - MSG_TTL_MS) return; // 7日を過ぎたものは表示しない
     const isNew = !knownIdsRef.current.has(msg.id); // setState の中ではなく、ここで判定する（通知が出ない・二重に出るのを防ぐ）
     knownIdsRef.current.add(msg.id);
     setMessages((prev) => {
@@ -1098,34 +1117,34 @@ function WordListRoom({ name, room, onLeave }) {
       playChime();
       if (notifyOnRef.current) {
         const preview = Array.from(String(msg.text || "")).slice(0, 60).join("");
-        showMessageNotification("たんご帳", preview, `chat-${topic}`); // 通知にはユーザー名を出さない
+        showMessageNotification("たんご帳", `${msg.sender}：${preview}`, `chat-${topic}`);
       }
     }
   }, [name, topic]);
 
-  const loadHistory = useCallback(async () => {
-    try {
-      const url = `${NTFY_BASE}/${topic}/json?poll=1&since=all`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      text.split("\n").map((l) => l.trim()).filter(Boolean).forEach(processLine);
-      setMessages((prev) => prev ?? []);
-      setError(null);
-    } catch (e) {
-      const reason = e && e.message ? e.message : "通信エラー";
-      setError(`読み込めませんでした（${reason}）。ネット接続を確認してください。`);
-      setMessages((prev) => prev ?? []);
+  // 通話のシグナル（offer / answer / ICE候補 / 切断）を処理する。
+  // 古いものや、すでに処理したものは無視する。
+  const processSignal = useCallback((snap, serverOffset) => {
+    const v = snap.val();
+    if (!v || typeof v.d !== "string") return;
+    if (seenSignalIdsRef.current.has(snap.key)) return;
+    seenSignalIdsRef.current.add(snap.key);
+    let payload;
+    try { payload = JSON.parse(v.d); } catch (e) { return; }
+    if (!payload || payload.kind !== "call-signal") return;
+    const ageSec = typeof v.t === "number" ? (Date.now() + (serverOffset || 0) - v.t) / 1000 : 0;
+    if (ageSec <= 30 && handleSignalRef.current) {
+      handleSignalRef.current(payload);
     }
-  }, [topic, processLine]);
+  }, []);
 
   // ---- WebRTC voice call: signaling helpers ----
 
   const sendCallMessage = useCallback((body) => {
-    fetch(`${NTFY_BASE}/${topic}`, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-      body: JSON.stringify(body),
+    ensureAuth().then(() => {
+      const r = fbDb.ref(`rooms/${topic}/signals`).push();
+      r.set({ d: JSON.stringify(body), t: FB_TS }).catch(() => {});
+      setTimeout(() => { r.remove().catch(() => {}); }, 60000); // シグナルは使い捨てなので1分後に消す
     }).catch(() => {});
   }, [topic]);
 
@@ -1386,9 +1405,8 @@ function WordListRoom({ name, room, onLeave }) {
   }, [muted]);
 
   // Incoming signaling messages (offers, answers, ICE candidates, hangups)
-  // all arrive through the same ntfy topic as chat messages, tagged with
-  // kind: "call-signal" so processLine can route them here instead of
-  // treating them as vocab entries.
+  // all arrive through rooms/{topic}/signals in Realtime Database
+  // (separate from the chat messages) and are routed here by processSignal.
   const handleSignal = useCallback(async (payload) => {
     if (payload.from === name) return; // ignore our own message echoed back
     const { type, callId } = payload;
@@ -1499,57 +1517,86 @@ function WordListRoom({ name, room, onLeave }) {
 
   useEffect(() => () => cleanupCall(), [cleanupCall]);
 
-  // A single long-lived connection instead of polling every few seconds.
-  // This is both lighter on ntfy.sh's shared servers (so it's less likely
-  // to get rate-limited on a desktop tab that stays open for hours) and
-  // recovers from drops on its own.
-  const connectSSE = useCallback(() => {
-    if (esRef.current) { esRef.current.close(); }
-    clearTimeout(reconnectTimerRef.current);
-    setConnState((prev) => (prev === "live" ? "reconnecting" : "connecting"));
-    const url = `${NTFY_BASE}/${topic}/sse?since=${encodeURIComponent(sinceRef.current)}`;
-    const es = new EventSource(url);
-    esRef.current = es;
-    es.onopen = () => {
-      setConnState("live");
-      reconnectAttemptsRef.current = 0;
-      setError(null);
-    };
-    es.onmessage = (ev) => processLine(ev.data);
-    es.onerror = () => {
-      es.close();
-      setConnState("reconnecting");
-      reconnectAttemptsRef.current += 1;
-      const delay = Math.min(2000 * reconnectAttemptsRef.current, 15000);
-      reconnectTimerRef.current = setTimeout(connectSSE, delay);
-    };
-  }, [topic, processLine]);
-
+// Realtime Database の購読。履歴の読み込みと新着の受信を1本でまかなう。
+  // 接続が切れたときの再接続は SDK が自動で行う。
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      await loadHistory();
+    let msgQ = null;
+    let sigQ = null;
+    let sweepTimer = null;
+    let serverOffset = 0;
+    const connRef = fbDb.ref(".info/connected");
+    const offRef = fbDb.ref(".info/serverTimeOffset");
+    const onConn = (s) => {
+      if (s.val()) { hasBeenLiveRef.current = true; setConnState("live"); setError(null); }
+      else setConnState(hasBeenLiveRef.current ? "reconnecting" : "connecting");
+    };
+    const onOff = (s) => { serverOffset = s.val() || 0; };
+    connRef.on("value", onConn);
+    offRef.on("value", onOff);
+
+    // 7日を過ぎたメッセージ（写真つきを含む）を画面から外し、データベースからも消す。
+    // 消せるのは期限切れのものだけ（ルールで制限している）。
+    const sweepExpired = () => {
+      const limit = Date.now() - MSG_TTL_MS;
+      setMessages((prev) => {
+        if (!prev) return prev;
+        const next = prev.filter((m) => m.ts >= limit);
+        return next.length === prev.length ? prev : next;
+      });
+      const col = fbDb.ref(`rooms/${topic}/messages`);
+      const cutoff = Date.now() + serverOffset - MSG_TTL_MS;
+      col.orderByChild("ts").endAt(cutoff).limitToFirst(100).once("value").then((snap) => {
+        const upd = {};
+        let n = 0;
+        snap.forEach((c) => { upd[c.key] = null; n++; });
+        if (!n) return null;
+        return col.update(upd).then(() => { if (!cancelled && n >= 100) sweepExpired(); });
+      }).catch(() => {});
+    };
+
+    const fail = (e) => {
       if (cancelled) return;
-      loadedRef.current = true;
-      connectSSE();
-    })();
+      const reason = e && e.message ? e.message : "通信エラー";
+      setError(`読み込めませんでした（${reason}）。ネット接続を確認してください。`);
+      setMessages((prev) => prev ?? []);
+    };
+
+    ensureAuth().then(() => {
+      if (cancelled) return;
+      const base = fbDb.ref(`rooms/${topic}`);
+      const cutoff = Date.now() + serverOffset - MSG_TTL_MS;
+      msgQ = base.child("messages").orderByChild("ts").startAt(cutoff).limitToLast(300);
+      msgQ.on("child_added", (snap) => processMessage(snap), fail);
+      // 最初の履歴（child_added）が全部届いたあとに value が来る。ここで「履歴の読み込み完了」とする。
+      msgQ.once("value", () => {
+        if (cancelled) return;
+        loadedRef.current = true;
+        setMessages((prev) => prev ?? []);
+        setError(null);
+      }, fail);
+      sigQ = base.child("signals").limitToLast(30);
+      sigQ.on("child_added", (snap) => processSignal(snap, serverOffset), fail);
+      sweepExpired();
+      sweepTimer = setInterval(sweepExpired, 60 * 60 * 1000); // 開きっぱなしでも1時間ごとに掃除
+    }).catch(fail);
+
     return () => {
       cancelled = true;
-      clearTimeout(reconnectTimerRef.current);
-      if (esRef.current) esRef.current.close();
+      connRef.off("value", onConn);
+      offRef.off("value", onOff);
+      if (msgQ) msgQ.off();
+      if (sigQ) sigQ.off();
+      if (sweepTimer) clearInterval(sweepTimer);
     };
-  }, [loadHistory, connectSSE]);
+  }, [topic, processMessage, processSignal]);
 
-  // Some browsers silently pause a background tab's SSE connection
-  // without ever firing onerror. Force a fresh connection whenever the
-  // tab becomes visible again, so switching back after a while doesn't
-  // leave you looking at a stalled, "disconnected" screen.
+  // 背景のタブで接続が止まることがあるので、画面に戻ったときに接続を確認し直す。
   useEffect(() => {
     const onWake = () => {
       if (!document.hidden) {
         clearMessageNotifications();
-        const es = esRef.current;
-        if (!es || es.readyState !== EventSource.OPEN) connectSSE();
+        fbDb.goOnline();
       }
     };
     clearMessageNotifications(); // 通知から開いた直後にも消す
@@ -1561,7 +1608,7 @@ function WordListRoom({ name, room, onLeave }) {
       window.removeEventListener("focus", onWake);
       window.removeEventListener("online", onWake);
     };
-  }, [connectSSE]);
+  }, []);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -1638,12 +1685,9 @@ function WordListRoom({ name, room, onLeave }) {
     if (!text || sending) return;
     setSending(true);
     try {
-      const res = await fetch(`${NTFY_BASE}/${topic}`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
-        body: JSON.stringify({ sender: name, text }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (connState !== "live") throw new Error("接続が切れています");
+      await ensureAuth();
+      await fbDb.ref(`rooms/${topic}/messages`).push({ sender: name, text, ts: FB_TS });
       notifyPush(topic, name, text);
       setDraft("");
       setError(null);
@@ -1683,16 +1727,11 @@ function WordListRoom({ name, room, onLeave }) {
     if (!photoDraft || sending) return;
     setSending(true);
     try {
-      const res = await fetch(`${NTFY_BASE}/${topic}`, {
-        method: "PUT",
-        headers: {
-          "Filename": "photo.jpg",
-          // ヘッダーはASCIIのみ可なので、名前はURLエンコードして渡す
-          "Message": JSON.stringify({ kind: "photo", sender: encodeURIComponent(name) }),
-        },
-        body: photoDraft.blob,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (connState !== "live") throw new Error("接続が切れています");
+      const photo = await blobToDataUrl(photoDraft.blob);
+      if (photo.length > 380000) throw new Error("写真が大きすぎます");
+      await ensureAuth();
+      await fbDb.ref(`rooms/${topic}/messages`).push({ sender: name, photo, ts: FB_TS });
       notifyPush(topic, name, "📷 写真を送りました");
       closePhotoModal();
       setError(null);
