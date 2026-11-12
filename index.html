@@ -642,6 +642,7 @@ const fbAuth = firebase.auth();
 const fbDb = firebase.database();
 const FB_TS = firebase.database.ServerValue.TIMESTAMP;
 const MSG_TTL_MS = 7 * 24 * 60 * 60 * 1000; // メッセージ・写真の保存期間（7日）
+const MAX_MESSAGES = 300; // 1つの部屋で読み込む／保存しておく最大件数（新しい順）
 
 // 匿名ログイン（読み書きにはログインが必要。ルール側で auth != null を確認する）
 let authPromise = null;
@@ -1555,6 +1556,28 @@ function WordListRoom({ name, room, onLeave }) {
       }).catch(() => {});
     };
 
+    // 新しい順に MAX_MESSAGES 件より古いメッセージは、どのみち表示されないのでDBからも消す。
+    // 起動時の読み込みは最新300件だけなので、その中で一番古い時刻より前のものが削除対象。
+    const seenTs = new Map(); // メッセージのキー -> ts（読み込んだ／届いたもの）
+    let overflowBusy = false;
+    const sweepOverflow = () => {
+      if (overflowBusy || cancelled || seenTs.size < MAX_MESSAGES) return;
+      const boundary = Array.from(seenTs.values()).sort((a, b) => b - a)[MAX_MESSAGES - 1];
+      const col = fbDb.ref(`rooms/${topic}/messages`);
+      overflowBusy = true;
+      col.orderByChild("ts").endAt(boundary - 1).limitToFirst(100).once("value").then((snap) => {
+        const upd = {};
+        let n = 0;
+        snap.forEach((c) => { upd[c.key] = null; n++; });
+        if (!n) { overflowBusy = false; return null; }
+        return col.update(upd).then(() => {
+          Object.keys(upd).forEach((k) => seenTs.delete(k));
+          overflowBusy = false;
+          if (!cancelled && n >= 100) sweepOverflow();
+        });
+      }).catch(() => { overflowBusy = false; });
+    };
+
     const fail = (e) => {
       if (cancelled) return;
       const reason = e && e.message ? e.message : "通信エラー";
@@ -1566,19 +1589,26 @@ function WordListRoom({ name, room, onLeave }) {
       if (cancelled) return;
       const base = fbDb.ref(`rooms/${topic}`);
       const cutoff = Date.now() + serverOffset - MSG_TTL_MS;
-      msgQ = base.child("messages").orderByChild("ts").startAt(cutoff).limitToLast(300);
-      msgQ.on("child_added", (snap) => processMessage(snap), fail);
+      msgQ = base.child("messages").orderByChild("ts").startAt(cutoff).limitToLast(MAX_MESSAGES);
+      msgQ.on("child_added", (snap) => {
+        const v = snap.val();
+        if (v && typeof v.ts === "number") seenTs.set(snap.key, v.ts);
+        processMessage(snap);
+        // 開きっぱなしでも、20件たまるごとに古い分を片づける
+        if (loadedRef.current && seenTs.size >= MAX_MESSAGES + 20) sweepOverflow();
+      }, fail);
       // 最初の履歴（child_added）が全部届いたあとに value が来る。ここで「履歴の読み込み完了」とする。
       msgQ.once("value", () => {
         if (cancelled) return;
         loadedRef.current = true;
         setMessages((prev) => prev ?? []);
         setError(null);
+        sweepOverflow();
       }, fail);
       sigQ = base.child("signals").limitToLast(30);
       sigQ.on("child_added", (snap) => processSignal(snap, serverOffset), fail);
       sweepExpired();
-      sweepTimer = setInterval(sweepExpired, 60 * 60 * 1000); // 開きっぱなしでも1時間ごとに掃除
+      sweepTimer = setInterval(() => { sweepExpired(); sweepOverflow(); }, 60 * 60 * 1000); // 開きっぱなしでも1時間ごとに掃除
     }).catch(fail);
 
     return () => {
